@@ -30,7 +30,7 @@ class ExperimentConfig:
 def generate_data(cfg: ExperimentConfig):
     """
     Returns:
-        (X, y, W): data matrix, observation matrix, true weights
+        (X, y, W, X_test, y_test): data matrix, observation matrix, true weights, test data matrix, test obserations
     """
     rng = np.random.default_rng(cfg.random_state)
 
@@ -47,7 +47,10 @@ def generate_data(cfg: ExperimentConfig):
     noise = rng.normal(loc=0, scale=sigma, size=cfg.n)
     y = X @ W + noise
 
-    return X, y, W
+    X_test = rng.normal(0, 1, size=(cfg.n_test, cfg.d))
+    y_test = X_test @ W + rng.normal(0, sigma, size=cfg.n_test)
+
+    return X, y, W, X_test, y_test
 
 
 def apply_mcar(X, cfg):
@@ -55,7 +58,7 @@ def apply_mcar(X, cfg):
     Given data matrix X and missing rate,
     applies Ho-MCAR on X and returns a copy with masked data aswell as the mask used.
     """
-    rng = np.random.default_rng(cfg.random_state)
+    rng = np.random.default_rng(cfg.random_state + 1)
     mask = rng.random(X.shape) < cfg.missing_rate
     X_missing = X.copy().astype(float)
     X_missing[mask] = np.nan
