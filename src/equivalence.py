@@ -1,5 +1,5 @@
 """
-Equivalence verification: naive zero imputation + OLS  ≈  ridge on complete data.
+Equivalence verification: naive zero imputation + ASGD  ≈  ridge on complete data.
 
 The paper (Ayme et al., 2023) shows that under MCAR with missing rate π,
 the OLS estimator on mean-imputed data converges to the ridge estimator with:
@@ -15,10 +15,14 @@ This module verifies this equivalence numerically across:
 """
 
 import numpy as np
-from sklearn.linear_model import Ridge, LinearRegression
+from sklearn.linear_model import Ridge, SGDRegressor
 from dataclasses import dataclass, replace
-
-from src.data_generator import ExperimentConfig, generate_data, apply_mcar
+from src.data_generator import (
+    ExperimentConfig,
+    generate_data,
+    apply_mcar,
+    generate_data_low_rank,
+)
 from src.imputer import ZeroImputer
 
 
@@ -37,10 +41,34 @@ def implicit_lambda(missing_rate: float) -> float:
     return missing_rate / (1 - missing_rate)
 
 
-def fit_naive_imputation(X_missing: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """OLS on zero-imputed data. Returns coefficient vector."""
+def fit_naive_imputation_asgd(
+    X_missing: np.ndarray,
+    y: np.ndarray,
+    random_state: int = 0,
+) -> np.ndarray:
+    """
+    ASGD on zero-imputed data. Uses sklearn SGDRegressor with averaged=True,
+    which implements the Polyak-Ruppert averaging scheme used in the paper.
+
+    Returns the averaged coefficient vector β̄.
+    """
     X_imputed = ZeroImputer().fit_transform(X_missing)
-    return LinearRegression(fit_intercept=False).fit(X_imputed, y).coef_
+    n_obs, n_features = X_missing.shape
+    eta0 = 1.0 / (n_features * np.sqrt(n_obs))
+
+    model = SGDRegressor(
+        loss="squared_error",
+        penalty=None,
+        fit_intercept=False,
+        average=True,
+        max_iter=3000,
+        tol=1e-4,
+        learning_rate="constant",
+        eta0=eta0,
+        random_state=random_state,
+    )
+    model.fit(X_imputed, y)
+    return model.coef_
 
 
 def fit_ridge(X_complete: np.ndarray, y: np.ndarray, lam: float) -> np.ndarray:
@@ -59,10 +87,10 @@ class EquivalenceResult:
     d: int
     missing_rate: float
     lambda_theory: float
-    coef_diff_norm: float
-    coef_diff_norm_relative: float
-    coef_naive: np.ndarray
-    coef_ridge: np.ndarray
+    coef_diff_norm: float  # ||β_asgd - β_ridge||_2
+    relative_norm: float  # ||β_asgd - β_ridge||_2 / ||β_ridge||_2
+    coef_naive: np.ndarray  # ASGD on zero-imputed data
+    coef_ridge: np.ndarray  # Ridge with theoretical λ
 
 
 def run_equivalence(cfg: ExperimentConfig) -> EquivalenceResult:
@@ -70,16 +98,17 @@ def run_equivalence(cfg: ExperimentConfig) -> EquivalenceResult:
     For a single config, fits both estimators and measures how close
     their coefficients are.
     """
-    X, y, W, X_test, y_test = generate_data(cfg)
+    X, y, theta_star, X_test, y_test = generate_data_low_rank(cfg)
     X_missing, _ = apply_mcar(X, cfg)
 
     lam = implicit_lambda(cfg.missing_rate)
 
-    beta_naive = fit_naive_imputation(X_missing, y)
+    beta_naive = fit_naive_imputation_asgd(X_missing, y, random_state=cfg.random_state)
     beta_ridge = fit_ridge(X, y, lam)
 
     diff_norm = float(np.linalg.norm(beta_naive - beta_ridge))
-    relative_diff = diff_norm / np.linalg.norm(beta_ridge)
+    ridge_norm = float(np.linalg.norm(beta_ridge))
+    relative_norm = diff_norm / ridge_norm if ridge_norm > 1e-10 else np.nan
 
     return EquivalenceResult(
         n=cfg.n,
@@ -87,7 +116,7 @@ def run_equivalence(cfg: ExperimentConfig) -> EquivalenceResult:
         missing_rate=cfg.missing_rate,
         lambda_theory=lam,
         coef_diff_norm=diff_norm,
-        coef_diff_norm_relative=relative_diff,
+        relative_norm=relative_norm,
         coef_naive=beta_naive,
         coef_ridge=beta_ridge,
     )

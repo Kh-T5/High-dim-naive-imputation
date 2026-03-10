@@ -47,7 +47,7 @@ class ZeroImputer(BaseImputer):
 
 
 # ---------------------------------------------------------------------------
-# Median imputation
+# Mean imputation
 # ---------------------------------------------------------------------------
 
 
@@ -97,7 +97,7 @@ class KNNImputer_(BaseImputer):
 
 class MICEImputer(BaseImputer):
     """
-    Iterative imputation (sklearn's implementation of MICE).
+    Iterative imputation (sklearn's implementation of ICE).
     Each feature is modeled as a function of the others in a round-robin fashion.
 
     Args:
@@ -139,7 +139,7 @@ class MissForestImputer(BaseImputer):
     def __init__(
         self,
         n_estimators: int = 100,
-        max_iter: int = 10,
+        max_iter: int = 5,
         random_state: int = 0,
     ):
         from sklearn.ensemble import RandomForestRegressor
@@ -171,7 +171,7 @@ def get_all_imputers(random_state: int = 0) -> dict[str, BaseImputer]:
     return {
         "Zero": ZeroImputer(),
         "Mean": MeanImputer(),
-        "KNN ": KNNImputer_(n_neighbors=5),
+        "KNN": KNNImputer_(n_neighbors=5),
         "MICE": MICEImputer(random_state=random_state),
         "MissForest": MissForestImputer(random_state=random_state),
     }
